@@ -310,18 +310,25 @@ def evaluate(parse_tree, until=is_normal_form, verbose=False,
              stop_if_looping=True):
     """
     Until is some state like `is_normal_form`
+
+    stop_if_looping is just a silly way for us to kill the program if a cycle
+    is detected. No this doesn't work for all infinite loops, but it
+    certainly does for most of them.
     """
     idx = 0
-    predex = None
+    if stop_if_looping:
+        observed_states = {}
     while not until(parse_tree):
         redex = beta_reduce(parse_tree, verbose=verbose)
-        if stop_if_looping and redex == predex:
-            raise Exception("We're looping")
+        if stop_if_looping and observed_states.get(str(redex)):
+            raise Exception("We're looping. Cycle length: {}"
+                            .format(len(observed_states)))
         if verbose:
             print("eval{}   {} => {}".format(idx, parse_tree, redex))
         parse_tree = redex
         idx += 1
-        predex = redex
+        if stop_if_looping:
+            observed_states[str(redex)] = True
     if verbose:
         print("eval{}   {}".format(idx, parse_tree))
     return parse_tree
@@ -391,8 +398,8 @@ def lang_from_filename(target_file=None, language=None):
     return language
 
 
-def read_file(input_file):
-    language = lang_from_filename(input_file)
+def read_file(input_file, language=None):
+    language = lang_from_filename(input_file, language)
     if language == BLC:
         return parse_blc_raw(slurp(input_file))
     elif language == LAM:
@@ -429,10 +436,13 @@ def run_shell(language=None, ps1_post=DEFAULT_PS1):
         pprint(eval_string(cmd, language=language))
 
 
-def run_compile(input_file, output_file):
+def run_compile(input_file, output_file, source_language=None,
+                target_language=None):
     # read and parse file_a
     # compile to file_b
-    return write_file(output_file, read_file(input_file))
+    return write_file(output_file,
+                      read_file(input_file, language=source_language),
+                      language=target_language)
 
 
 def run_file(input_file, language=None, verbose=False):
@@ -485,6 +495,9 @@ examples:
     parser.add_argument('--language', metavar='lam|blc',
                         help='Language for shell or command.')
 
+    parser.add_argument('--target-language', metavar='lam|blc',
+                        help='Target language for assembler.')
+
     parser.add_argument('-c', metavar='command',
                         help='Command to run.')
 
@@ -494,7 +507,9 @@ examples:
     args = parser.parse_args()
     if args.input_file and args.output_file:
         # compilation time
-        run_compile(args.input_file, args.output_file)
+        run_compile(args.input_file, args.output_file,
+                    source_language=args.language,
+                    target_language=args.target_language)
     elif args.input_file:
         # run file
         run_file(args.input_file, verbose=args.verbose)
