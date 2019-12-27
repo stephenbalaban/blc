@@ -1,5 +1,5 @@
 #!/bin/bash
-RANDOM_SIZE=1024
+RANDOM_SIZE=2048
 while :;
 	do prog=random-lambda.blc;
 	(until (echo $(head -c $RANDOM_SIZE /dev/urandom  | xxd -b | awk '{ print $2, $3}' | sed 's/ //g')  | sed 's/ //g' > $prog; blc $prog &> /dev/null); do :; done);
