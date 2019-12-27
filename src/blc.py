@@ -227,7 +227,7 @@ def shift(tree, amt=1, depth=0):
         raise TypeError(tree)
 
 
-def substitute(lhs, rhs, depth=0, verbose=False):
+def substitute(lhs, rhs, depth=0):
     """
     1. Replace de bruijn index bound by the outside lambda in lhs with rhs.
     2. Increment any indexes in rhs that are bound to lambdas outside of lhs
@@ -259,8 +259,6 @@ def substitute(lhs, rhs, depth=0, verbose=False):
 
     # Pop off the lambda for the top expression
     if depth == 0:
-        if verbose:
-            print("sub{}: {}/{} => {}".format(depth, lhs, rhs, result))
         result = shift(result[1], amt=-1)
     return result
 
@@ -273,7 +271,7 @@ def normal_order_reduction(tree, verbose=False):
         if type(a) == list:
             return [normal_order_reduction(a, verbose=verbose), b]
         elif type(a) == tuple:
-            return substitute(a, b, verbose=verbose)
+            return substitute(a, b)
         else:  # int
             assert type(a) == int
             return [a, normal_order_reduction(b, verbose=verbose)]
@@ -308,17 +306,22 @@ def is_normal_form(tree, verbose=True):
         raise Exception("Unknown type.")
 
 
-def evaluate(parse_tree, until=is_normal_form, verbose=False):
+def evaluate(parse_tree, until=is_normal_form, verbose=False,
+             stop_if_looping=True):
     """
     Until is some state like `is_normal_form`
     """
     idx = 0
+    predex = None
     while not until(parse_tree):
         redex = beta_reduce(parse_tree, verbose=verbose)
+        if stop_if_looping and redex == predex:
+            raise Exception("We're looping")
         if verbose:
             print("eval{}   {} => {}".format(idx, parse_tree, redex))
         parse_tree = redex
         idx += 1
+        predex = redex
     if verbose:
         print("eval{}   {}".format(idx, parse_tree))
     return parse_tree
@@ -435,7 +438,7 @@ def run_compile(input_file, output_file):
 def run_file(input_file, language=None, verbose=False):
     language = lang_from_filename(input_file, language)
     contents = slurp(input_file)
-    return pprint(eval_string(contents, language=language))
+    return pprint(eval_string(contents, language=language, verbose=verbose))
 
 
 def eval_string(contents, language=None, verbose=False):
@@ -485,13 +488,16 @@ examples:
     parser.add_argument('-c', metavar='command',
                         help='Command to run.')
 
+    parser.add_argument('--verbose', help='Print evaluation steps.',
+                        action='store_true')
+
     args = parser.parse_args()
     if args.input_file and args.output_file:
         # compilation time
         run_compile(args.input_file, args.output_file)
     elif args.input_file:
         # run file
-        run_file(args.input_file)
+        run_file(args.input_file, verbose=args.verbose)
     elif args.c:
         # command tie
         pprint(eval_string(args.c, language=args.language))

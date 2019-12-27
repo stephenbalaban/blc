@@ -1,5 +1,74 @@
 # blc
-Implementing the Binary Lambda Calculus in C
+
+## To install
+
+```
+git clone git@github.com:stephenbalaban/blc.git && cd blc/
+sudo make install
+blc
+blc> 0010
+0010
+blc> 01000110100010
+0010
+```
+
+Playing with the compiler.
+
+```
+$ echo '01000110100010' | blc - foo.blc && cat foo.blc
+#!/usr/bin/env blc
+01000110100010`
+$ ./foo.blc
+0010
+```
+
+Going to make a more human readable version without de bruijn indices.
+
+```
+echo '01000110100010' | blc - test.lam && cat test.lam
+#!/usr/bin/env blc
+(\x.(x x) \x.x)
+```
+
+Search for random lambda expressions:
+
+```
+while :;
+do
+	prog=random.blc;
+	(until (echo $(head -c 256 /dev/urandom  | xxd -b | awk '{ print $2, $3}' | sed 's/ //g')  | sed 's/ //g' > $prog; blc $prog &> /dev/null); do :; done);
+	start=$(date +%s); steps=$(blc $prog --verbose | wc -l); end=$(date +%s); duration=$((end-start));
+	if (( $steps > 2 ));
+	then
+		cat $prog; echo "steps $steps duration $duration";
+	fi;
+done
+0100011111101011011100000100011100000100001010110010011101010101110011110100110111111011100001100111101001011010111010011011001011110001100010011110011010000111000111000001011001111111101111100000010011100010010101110111001111000001101101101001001001011010010110111011100111101111010000010100101111110100001100010000111000001100011001001001000001110110011111010101111110111011111100010111110010100011111101010010011111111111010001111101010010110100101100101010000000010101101100111101000111001101110100010011101101011000011111000100001100110000001101011100110111010111000111000000010011111110011110111001010110100001010101101101101010011101111001100001110110100101001011000000111111101101
+steps 3 duration 1
+```
+
+I've found some interesting expressions this way, like this one that loops forever:
+
+```
+((z y) \x.(\y.x ((y \y.\z.(\a.x z)) ((\y.a a) \y.\z.x))))
+01011110110000100100101110000001001011100101001111011110000010
+```
+
+## Comments
+
+## TODO
+
+- implement actual binary BLC (instead of ASCII 0s and 1s)
+- implement 8-bit packed BLC
+- would be cool to have a dense representation of the AST with some sort of
+  reducer that operated on that binary structure
+- implement human readable version with stateful variables, church numerals
+- implement some other non-church numeral encoding, maybe IEEE 754 fp or unum?
+- re-implement in C
+
+## Notes
+
+Implementing the Binary Lambda Calculus in Python
 
 Following John Tromp's Lambda Calculus paper: http://tromp.github.io/cl/LC.pdf
 
