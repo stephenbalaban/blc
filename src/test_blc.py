@@ -40,6 +40,16 @@ def assert_eq(raw_str, fn, expectation):
                                              expectation))
 
 
+def sassert_eq(lhs, rhs, expectation):
+    # Substitution tests.
+    result = blc.substitute(lhs, rhs)
+    msg = ("substitution test: ('{}', '{}') => '{}' expected but got '{}'"
+           .format(lhs, rhs, expectation, result))
+    assert result == expectation, msg
+    print("{}/{} passed substitution test {}"
+          .format(lhs, rhs, result))
+
+
 if __name__ == '__main__':
     # parse
     # invalid
@@ -62,6 +72,33 @@ if __name__ == '__main__':
     nassert_eq('0100100010', False)
     nassert_eq('00000100100010', False)
     nassert_eq('0101000010001000111110', False)
+
+    # substitution check (before dropping head)
+    sassert_eq((LAMBDA, 0), (LAMBDA, 4), (LAMBDA, 4))
+
+    # shift free variables in rhs
+    sassert_eq((LAMBDA, (LAMBDA, [0, 1])), (LAMBDA, 5),
+               (LAMBDA, [0, (LAMBDA, 6)]))
+
+    # decrement free variables in lhs
+    pass
+
+    # shifting only free variables
+    sassert_eq((LAMBDA, (LAMBDA, [[0, 2], 1])), (LAMBDA, [[7, 0], 1]),
+               (LAMBDA, [[0, 1], (LAMBDA, [[8, 0], 2])]))
+
+    # (λ λ 3 1 (λ 0 2)) (λ 4 0)
+    # λ ((2 (λ 5 0)) (λ 0 (λ 6 0)))
+    sassert_eq((LAMBDA, (LAMBDA, [[3, 1],
+                                  (LAMBDA, [0, 2])])),
+               (LAMBDA, [4, 0]),
+               (LAMBDA, [[2, (LAMBDA, [5, 0])],
+                         (LAMBDA, [0, (LAMBDA, [6, 0])])]))
+
+    a = (LAMBDA, (LAMBDA, (LAMBDA, [2, 1])))
+    b = (LAMBDA, (LAMBDA, (LAMBDA, [[1, 0], 2])))
+    r = (LAMBDA, (LAMBDA, [(LAMBDA, (LAMBDA, (LAMBDA, [[1, 0], 2]))), 1]))
+    sassert_eq(a, b, r)
 
     # evaluation tests
     rassert_eq('010000000111101100000000101110101110',
@@ -101,4 +138,4 @@ if __name__ == '__main__':
 
     # Pow 2^3
     rassert_eq('010000011100111001110100000011100111010',
-               (LAMBDA, (LAMBDA, [1, [1, [1, [1, 0]]]])))
+               (LAMBDA, (LAMBDA, [1, [1, [1, [1, [1, [1, [1, [1, 0]]]]]]]])))

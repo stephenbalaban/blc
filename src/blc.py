@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
     A BLC parser/interpreter in python
 
@@ -7,45 +7,60 @@
     :license: MIT
 """
 import sys
-
-
-def getc():
-    return sys.stdin.read(1)
+import os
+import argparse
 
 
 # Non-terminals
 NT_LAMBDA = '00'
 NT_APPLY = '01'
+NT_COMMENT_BEGIN = '#'
+NT_NEWLINE = '\n'
+NT_LAMBDA_LAM = '\\'
 
+# Compiler output
+EVALUATION_HEADER = '#!/usr/bin/env blc'
 
-def IS_VAR(two):
-    return two == '10' or two == '11'
-
+# Language extensions
+BLC = 'blc'  # .blc files
+LAM = 'lam'  # .lam files
+DEFAULT_LANG = BLC
 
 # Terminals
 LAMBDA = 'λ'
 APPLY = 'A'
+COMMENT_BEGIN = 'COMMENT_BEGIN'
+NEWLINE = 'NEWLINE'
+NOP = None
 
 # Grammar
 # 1^{n+1}0  = int
 # 00M       = (LAMBDA, M)
 # 01MN      = [M, N]
 
+# Shell settings
+DEFAULT_PS1 = '> '
+
+
+def IS_VAR(two):
+    return two == '10' or two == '11'
+
+
+def int_to_debruijn(integer):
+    return '1'*(integer + 1) + '0'
+
 
 def lex(source_string):
-    L = NT_LAMBDA
-    A = NT_APPLY
-
     i = 0
     while True:
         try:
             two = source_string[i] + source_string[i + 1]
         except IndexError:
             break
-        if two == L:
+        if two == NT_LAMBDA:
             i = i + 2
             yield LAMBDA
-        elif two == A:
+        elif two == NT_APPLY:
             i = i + 2
             yield APPLY
         elif IS_VAR(two):
@@ -58,8 +73,16 @@ def lex(source_string):
                 n = source_string[i + 1 + dbindex]
             i = i + 2 + dbindex
             yield dbindex
+        elif two[0] == NT_COMMENT_BEGIN:
+            i = i + 1
+            yield COMMENT_BEGIN
+        elif two[0] == NT_NEWLINE:
+            i = i + 1
+            yield NEWLINE
         else:
-            assert False, "Not a valid character."
+            i = i + 1
+            yield two[0]
+            # assert False, "Not a valid character. {}".format(two)
 
 
 def body(expr):
@@ -95,6 +118,10 @@ def find_argument(a):
     assert False, "Couldn't find a lambda or variable, malformed code."
 
 
+def linecount(toklist):
+    return sum(1 for tok in toklist if tok == NEWLINE)
+
+
 def parse(tokens):
     """
     Every time you generate a statement, backtrack to see if you have completed
@@ -102,16 +129,29 @@ def parse(tokens):
     """
     revlist = list(reversed(tokens))
     stack = []
+    line = linecount(revlist)
+    col = 1
     for tok in revlist:
-        if type(tok) == int:
-            r = parse_var(tok, stack)
-        elif tok == APPLY:
-            r = parse_apply(tok, stack)
-        elif tok == LAMBDA:
-            r = parse_lambda(tok, stack)
-        else:
-            assert False, "nope."
-        stack.insert(0, r)
+        col += 1
+        try:
+            if type(tok) == int:
+                r = parse_var(tok, stack)
+            elif tok == APPLY:
+                r = parse_apply(tok, stack)
+            elif tok == LAMBDA:
+                r = parse_lambda(tok, stack)
+            elif tok == NEWLINE:
+                col = 1
+                line -= 1
+                r = NOP
+            else:
+                # Some other token that's unknown, probably a comment.
+                r = NOP
+            if r is not NOP:
+                stack.insert(0, r)
+        except IndexError as e:
+            raise SyntaxError("Invalid syntax at: Line {}, Column {}"
+                              .format(line, col))
     return stack.pop(0)
 
 
@@ -130,39 +170,128 @@ def parse_var(tok, context):
     return tok
 
 
-def read():
+def slurp(filepath):
+    if filepath == '-':
+        return sys.stdin.read()
+    with open(filepath) as f:
+        return f.read()
+
+
+def spit(filepath, body, executable=False):
+    if filepath == '-':
+        sys.stdout.write(body)
+        sys.stdout.flush()
+    else:
+        with open(filepath, 'w+') as f:
+            f.write(body)
+        if executable:
+            os.chmod(filepath, 0o755)
+
+
+def read(verbose=False):
     raw_text = ''.join(sys.stdin)
-    print("raw text: " + raw_text)
-    return parse_raw(raw_text)
+    if verbose:
+        print("raw text: " + raw_text)
+    return parse_blc_raw(raw_text)
 
 
-def parse_raw(raw_text):
+def parse_blc_raw(raw_text):
     return parse(list(lex(raw_text)))
+
+
+def parse_lambda_raw(raw_text):
+    return parse
 
 
 def pprint(parse_tree):
     print(parse_tree)
+    return parse_tree
 
 
-def beta_reduce(tree, verbose=False):
-    return tree
+def shift(tree, amt=1, depth=0):
+    # Only shift free variables
+    # (those not bound within this particular expression, i.e. whose value is
+    #  >= depth)
+    if type(tree) == int:
+        if tree >= depth:
+            return tree + amt
+        else:
+            return tree
+    elif type(tree) == tuple:
+        return (LAMBDA, shift(tree[1], amt=amt, depth=depth+1))
+    elif type(tree) == list:
+        a, b = tree
+        return [shift(a, amt=amt, depth=depth),
+                shift(b, amt=amt, depth=depth)]
+    else:
+        raise TypeError(tree)
+
+
+def substitute(lhs, rhs, depth=0, verbose=False):
+    """
+    1. Replace de bruijn index bound by the outside lambda in lhs with rhs.
+    2. Increment any indexes in rhs that are bound to lambdas outside of lhs
+       shift up according to how deep rhs is inserted into lhs.
+    3. Drop the external lambda and decrement any free variables of lhs.
+    """
+    # Traverse the tree in pre-order (root, left, right)
+    # Walk the entire tree to replace subterms.
+    result = None
+    if type(lhs) == int:
+        if lhs + 1 == depth:  # The depth we're looking for:
+            result = rhs
+        else:
+            result = lhs
+    elif type(lhs) == tuple:
+        # we shift up rhs's free variables every time we push it into an
+        # abstraction.
+        result = (LAMBDA,
+                  substitute(lhs[1],
+                             shift(rhs, amt=+1),
+                             depth=depth+1))
+    elif type(lhs) == list:
+        a, b = lhs
+        result = [substitute(a, rhs, depth=depth),
+                  substitute(b, rhs, depth=depth)]
+    else:
+        raise TypeError("Unknown type for substitution {}."
+                        .format(lhs))
+
+    # Pop off the lambda for the top expression
+    if depth == 0:
+        if verbose:
+            print("sub{}: {}/{} => {}".format(depth, lhs, rhs, result))
+        result = shift(result[1], amt=-1)
+    return result
+
+
+def normal_order_reduction(tree, verbose=False):
+    # choose the left-most redex first
+    # substitute in the left hand side then reduce the rest
+    if type(tree) == list:
+        a, b = tree
+        if type(a) == list:
+            return [normal_order_reduction(a, verbose=verbose), b]
+        elif type(a) == tuple:
+            return substitute(a, b, verbose=verbose)
+        else:  # int
+            assert type(a) == int
+            return [a, normal_order_reduction(b, verbose=verbose)]
+    elif type(tree) == tuple:
+        return (LAMBDA, normal_order_reduction(tree[1], verbose=verbose))
+    elif type(tree) == int:
+        return tree
+    else:
+        raise TypeError("Unknown type passed to reducer '{}': {}."
+                        .format(type(tree), tree))
+
+
+# Set reduction strategy here.
+beta_reduce = normal_order_reduction
 
 
 def is_head_normal_form(parse_tree):
     return type(parse_tree) != list
-
-
-def evaluate(parse_tree, verbose=True):
-    idx = 0
-    while is_head_normal_form(parse_tree):
-        redex = beta_reduce(parse_tree, verbose=verbose)
-        if verbose:
-            print("{}   {} => {}".format(idx, parse_tree, redex))
-        parse_tree = redex
-        idx += 1
-    if verbose:
-        print("{}   {}".format(idx, parse_tree))
-    return parse_tree
 
 
 def is_normal_form(tree, verbose=True):
@@ -179,5 +308,193 @@ def is_normal_form(tree, verbose=True):
         raise Exception("Unknown type.")
 
 
+def evaluate(parse_tree, until=is_normal_form, verbose=False):
+    """
+    Until is some state like `is_normal_form`
+    """
+    idx = 0
+    while not until(parse_tree):
+        redex = beta_reduce(parse_tree, verbose=verbose)
+        if verbose:
+            print("eval{}   {} => {}".format(idx, parse_tree, redex))
+        parse_tree = redex
+        idx += 1
+    if verbose:
+        print("eval{}   {}".format(idx, parse_tree))
+    return parse_tree
+
+
+def tree_to_blc(parse_tree):
+    def walker(tree):
+        if type(tree) == int:
+            yield int_to_debruijn(tree)
+        elif type(tree) == tuple:
+            yield '00' + tree_to_blc(tree[1])
+        elif type(tree) == list:
+            a, b = tree
+            yield '01' + tree_to_blc(a) + tree_to_blc(b)
+        else:
+            raise TypeError("Unknown type for parse_tree {}"
+                            .format(parse_tree))
+    # We perform a pre-order traversal node,left,right to go from parse tree to
+    # blc
+    return ''.join(walker(parse_tree))
+
+
+def tree_to_lam(parse_tree, depth=0, lambda_sym=NT_LAMBDA_LAM, debruijn=False):
+    # currently supports only 26 vars...
+    alphabet = 'xyzabcdefghijklmnopqrstuvw'
+
+    def walker(tree):
+        if type(tree) == int:
+            if debruijn:
+                yield str(tree)
+            else:
+                var = alphabet[tree]
+                yield var
+        elif type(tree) == tuple:
+            body = tree_to_lam(tree[1], depth=depth+1, debruijn=debruijn)
+            if debruijn:
+                yield '{} {}'.format(lambda_sym, body)
+            else:
+                var = alphabet[depth]
+                yield '{}{}.{}'.format(lambda_sym, var, body)
+        elif type(tree) == list:
+            a, b = tree
+            yield ('({} {})'
+                   .format(tree_to_lam(a, depth=depth),
+                           tree_to_lam(b, depth=depth)))
+        else:
+            raise TypeError("Unknown type for parse_tree {}"
+                            .format(parse_tree))
+    # We perform a pre-order traversal node,left,right to go from parse tree to
+    # lambda calculus with debruijn indices
+    return ''.join(walker(parse_tree))
+
+
+def shell(language):
+    pass
+
+
+def lang_from_filename(target_file=None, language=None):
+    if language:
+        language = BLC if BLC in language.lower() else LAM
+    elif target_file:
+        language = os.path.splitext(target_file)[1].lower()[1:]
+
+    if not language:
+        language = DEFAULT_LANG
+
+    return language
+
+
+def read_file(input_file):
+    language = lang_from_filename(input_file)
+    if language == BLC:
+        return parse_blc_raw(slurp(input_file))
+    elif language == LAM:
+        return parse_lambda_raw(slurp(input_file))
+    else:
+        raise ValueError("Unknown language: {}".format(language))
+
+
+def write_file(target_file, lambda_expression, language=None):
+    language = lang_from_filename(target_file, language)
+    if language == BLC:
+        body = tree_to_blc(lambda_expression)
+        header = EVALUATION_HEADER
+        output = '{}\n{}\n'.format(header, body)
+    elif language == LAM:
+        body = tree_to_lam(lambda_expression)
+        header = EVALUATION_HEADER
+        output = '{}\n{}\n'.format(header, body)
+    else:
+        raise ValueError("Unknown language: {}".format(language))
+    return spit(target_file, output, executable=True)
+
+
+def run_shell(language=None, ps1_post=DEFAULT_PS1):
+    def ps1(pre, post):
+        pre = LAMBDA if pre == LAM else pre
+        return '{}{}'.format(pre, post)
+    language = lang_from_filename(None, language)
+    QUIT_CMD = 'exit()'
+    while True:
+        cmd = input(ps1(pre=language, post=ps1_post))
+        if cmd == QUIT_CMD:
+            break
+        pprint(eval_string(cmd, language=language))
+
+
+def run_compile(input_file, output_file):
+    # read and parse file_a
+    # compile to file_b
+    return write_file(output_file, read_file(input_file))
+
+
+def run_file(input_file, language=None, verbose=False):
+    language = lang_from_filename(input_file, language)
+    contents = slurp(input_file)
+    return pprint(eval_string(contents, language=language))
+
+
+def eval_string(contents, language=None, verbose=False):
+    language = lang_from_filename(None, language=language)
+    if language == BLC:
+        parse_tree = parse_blc_raw(contents)
+    elif language == LAM:
+        parse_tree = parse_lambda_raw(contents)
+    else:
+        raise ValueError("Unknown language.")
+    eval_tree = evaluate(parse_tree, verbose=verbose)
+    if language == BLC:
+        return tree_to_blc(eval_tree)
+    elif language == LAM:
+        return tree_to_lam(eval_tree)
+    else:
+        raise Exception
+
+
 if __name__ == '__main__':
-    pprint(evaluate(read()))
+    epilog = """
+examples:
+    blc foo.{lam}
+    blc bar.{blc}
+    blc shell --language {blc}
+    {blc}> 0100100010
+    0010
+    blc shell --language {lam}
+    {LAMBDA}> \\x \\y y
+    """.format(lam=LAM, blc=BLC, LAMBDA=LAMBDA)
+    parser = (argparse.ArgumentParser(
+              description='An interpreter for the untyped lambda calculus.',
+              epilog=epilog,
+              formatter_class=argparse.RawDescriptionHelpFormatter))
+
+    parser.add_argument('input_file', metavar='input_file',
+                        nargs='?', default=None,
+                        help='input file')
+
+    parser.add_argument('output_file', metavar='output_file',
+                        nargs='?', default=None,
+                        help='target file')
+
+    parser.add_argument('--language', metavar='lam|blc',
+                        help='Language for shell or command.')
+
+    parser.add_argument('-c', metavar='command',
+                        help='Command to run.')
+
+    args = parser.parse_args()
+    if args.input_file and args.output_file:
+        # compilation time
+        run_compile(args.input_file, args.output_file)
+    elif args.input_file:
+        # run file
+        run_file(args.input_file)
+    elif args.c:
+        # command tie
+        pprint(eval_string(args.c, language=args.language))
+    else:
+        # shell time
+        run_shell(language=args.language)

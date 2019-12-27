@@ -8,7 +8,7 @@ As well as getting some tips from his implementation: https://tromp.github.io/cl
 ## Understanding the paper
 
 To implement, we must first read the actual paper. Here are some notes
-/ summarizations from my reading.
+/ summarization from my reading.
 
 I've already read through https://www.amazon.com/Introduction-Functional-Programming-Calculus-Mathematics/dp/0486478831
 multiple times so I am going to read through but not discuss further the
@@ -29,11 +29,11 @@ So the string (011 : nil) = <true, <false, <false, nil>>> which represents 011.
 
 ### de Bruijn index
 
-Instead of using variables x y z etc., we can use indicies (read from right to
+Instead of using variables x y z etc., we can use indices (read from right to
 left) to fill in the values.
 
-the de Buijn index refers to how many lambda abstractions lie between the bound
-variable and the lambda that binds it. For example in this arbitaray expressino:
+the de Bruijn index refers to how many lambda abstractions lie between the bound
+variable and the lambda that binds it. For example in this arbitrary expression:
 
 
 \a \b \c ((c (b a)) \x (b b))
@@ -49,7 +49,7 @@ We can confirm this with:
 echo $(cat parse.Blc <(echo "\a \b \c (c (b a)) \x (b b)") | ./tromp)
 000000010110011101110000111101110
 
-Translated from the blc to debruijn index:
+Translated from the blc to de Bruijn index:
 
 λ  λ  λ  (  (  0  (  1   2    λ  (  2    2
 00 00 00 01 01 10 01 110 1110 00 01 1110 1110
@@ -60,7 +60,7 @@ When in doubt, just 0-index count back to the binding lambda.
 
 Some more de Bruijn index examples:
 
-```
+indices
 Name		| Lambda			   | de Bruijn index             | BLC encoding
 ----------------+----------------------------------+-----------------------------+--------------------
 Identity 	| λx.x				   | λ 0			 | 0010
@@ -71,12 +71,12 @@ S combinator	| λx.λy.λz.x z (y z)		   | λ λ λ ((2 0) (1 0))	 | 00000001011
 Y combinator	| λf.λx.((f (x x)) λx.(f (x x)))   | λ λ ((1 (0 0)) λ (2 (0 0))) | 0000010111001101000011110011010
 Omega		| \x.((x x) \x.(x x))		   | λ ((0 0) λ (0 0))		 | 000101101000011010
 ```
-### Encoding the de Bruijn notation into a binary string
+### Encoding the de Bruijn indices into a binary string
 
-We need a way to encode de Bruijn notation lambda expressions into binary
+We need a way to encode de Bruijn indices lambda expressions into binary
 strings. 
 
-Definition 2: The code for a term in de Buijn notation is defined
+Definition 2: The code for a term in de Buijn indices is defined
 inductively as follows:
 
 n = 1^(n+1)0
@@ -101,7 +101,7 @@ the following relatively simple lambda calculus expression:
 
 You can clearly see that the left hand expression is an expression for "second"
 while the first argument is the identity function and the second argument is
-the self function. So, it should Beta-reduce to self. In debruijn notation:
+the self function. So, it should Beta-reduce to self. In de Bruijn indices:
 
 (((λ λ 1) (λ 0)) (λ (0 0)))
 
@@ -144,4 +144,4 @@ E1 = (b (c (λz.z b))(λs.e (λx.c(λz.x (z b))) t))
 E = Y (λe c s.s (λa t.t (λb.a (e (λx.b(c(λz y.x <y, z>))(e (λy.c(λz.x z (y z)))))) (b (c (λz.z b))(λs.e (λx.c(λz.x (z b))) t)))))
   = λf.((λx.x x)(λx.f (x x))) (λe c s.s (λa t.t (λb.a (e (λx.b(c(λz y.x <y, z>))(e (λy.c(λz.x z (y z)))))) (b (c (λz.z b))(λs.e (λx.c(λz.x (z b))) t)))))
 
-Translated into debruijn notation:
+Translated into de Bruijn indices:
