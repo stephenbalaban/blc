@@ -324,13 +324,13 @@ def evaluate(parse_tree, until=is_normal_form, verbose=False,
             raise Exception("We're looping. Cycle length: {}"
                             .format(len(observed_states)))
         if verbose:
-            print("eval{}   {} => {}".format(idx, parse_tree, redex))
+            print("eval{}   {}".format(idx, tree_to_lam(parse_tree)))
         parse_tree = redex
         idx += 1
         if stop_if_looping:
             observed_states[str(redex)] = True
     if verbose:
-        print("eval{}   {}".format(idx, parse_tree))
+        print("eval{}   {}".format(idx, tree_to_lam(parse_tree)))
     return parse_tree
 
 
