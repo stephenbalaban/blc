@@ -25,7 +25,7 @@ $ ./foo.blc
 Going to make a more human readable version without de bruijn indices.
 
 ```
-echo '01000110100010' | blc - test.lam && cat test.lam
+echo '01000110100010' | blc - - --target-language lam
 #!/usr/bin/env blc
 (\x.(x x) \x.x)
 ```
