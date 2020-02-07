@@ -130,6 +130,7 @@ When in doubt, just 0-index count back to the binding lambda.
 Some more de Bruijn index examples:
 
 indices
+```
 Name		| Lambda			   | de Bruijn index             | BLC encoding
 ----------------+----------------------------------+-----------------------------+--------------------
 Identity 	| λx.x				   | λ 0			 | 0010
