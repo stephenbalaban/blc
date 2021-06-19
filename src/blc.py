@@ -9,6 +9,8 @@
 import sys
 import os
 import argparse
+import tqdm
+import numpy as np
 
 
 # Non-terminals
@@ -149,7 +151,7 @@ def parse(tokens):
                 r = NOP
             if r is not NOP:
                 stack.insert(0, r)
-        except IndexError as e:
+        except IndexError:
             raise SyntaxError("Invalid syntax at: Line {}, Column {}"
                               .format(line, col))
     return stack.pop(0)
@@ -307,7 +309,7 @@ def is_normal_form(tree, verbose=True):
 
 
 def evaluate(parse_tree, until=is_normal_form, verbose=False,
-             stop_if_looping=True):
+             stop_if_looping=True, language=None):
     """
     Until is some state like `is_normal_form`
 
@@ -324,14 +326,55 @@ def evaluate(parse_tree, until=is_normal_form, verbose=False,
             raise Exception("We're looping. Cycle length: {}"
                             .format(len(observed_states)))
         if verbose:
-            print("eval{}   {}".format(idx, tree_to_lam(parse_tree)))
+            tree = tree_to_lang(parse_tree, language=language)
+            print("eval{}   {}".format(idx, tree))
         parse_tree = redex
         idx += 1
         if stop_if_looping:
             observed_states[str(redex)] = True
     if verbose:
-        print("eval{}   {}".format(idx, tree_to_lam(parse_tree)))
+        tree = tree_to_lang(parse_tree, language=language)
+        print("eval{}   {}".format(idx, tree))
     return parse_tree
+
+
+def evaluate_generator(parse_tree, until=is_normal_form,
+                       stop_if_looping=True, language=None):
+    """
+    Until is some state like `is_normal_form`
+
+    stop_if_looping is just a silly way for us to kill the program if a cycle
+    is detected. No this doesn't work for all infinite loops, but it
+    certainly does for many of them.
+
+    evaluate generator is like evaluate but results in a generator of every
+    step instead of a single tree
+    """
+    idx = 0
+    if stop_if_looping:
+        observed_states = {}
+    while not until(parse_tree):
+        redex = beta_reduce(parse_tree)
+        if stop_if_looping and observed_states.get(str(redex)):
+            raise Exception("We're looping. Cycle length: {}"
+                            .format(len(observed_states)))
+        tree = tree_to_lang(parse_tree, language=language)
+        yield tree
+        parse_tree = redex
+        idx += 1
+        if stop_if_looping:
+            observed_states[str(redex)] = True
+    tree = tree_to_lang(parse_tree, language=language)
+    yield tree
+
+
+def tree_to_lang(parse_tree, language=None):
+    if language == BLC:
+        return tree_to_blc(parse_tree)
+    elif language == LAM:
+        return tree_to_lam(parse_tree)
+    else:
+        raise Exception("Unknown language: {}".format(language))
 
 
 def tree_to_blc(parse_tree):
@@ -410,16 +453,9 @@ def read_file(input_file, language=None):
 
 def write_file(target_file, lambda_expression, language=None):
     language = lang_from_filename(target_file, language)
-    if language == BLC:
-        body = tree_to_blc(lambda_expression)
-        header = EVALUATION_HEADER
-        output = '{}\n{}\n'.format(header, body)
-    elif language == LAM:
-        body = tree_to_lam(lambda_expression)
-        header = EVALUATION_HEADER
-        output = '{}\n{}\n'.format(header, body)
-    else:
-        raise ValueError("Unknown language: {}".format(language))
+    body = tree_to_lang(lambda_expression, language=language)
+    header = EVALUATION_HEADER
+    output = '{}\n{}\n'.format(header, body)
     return spit(target_file, output, executable=True)
 
 
@@ -459,13 +495,39 @@ def eval_string(contents, language=None, verbose=False):
         parse_tree = parse_lambda_raw(contents)
     else:
         raise ValueError("Unknown language.")
-    eval_tree = evaluate(parse_tree, verbose=verbose)
-    if language == BLC:
-        return tree_to_blc(eval_tree)
-    elif language == LAM:
-        return tree_to_lam(eval_tree)
-    else:
-        raise Exception
+    eval_tree = evaluate(parse_tree, language=language, verbose=verbose)
+    return tree_to_lang(eval_tree, language=language)
+
+
+def generate_expression(length=10):
+    S = '0000000101101110011101110'
+    K = '0000110'
+    I = '0011' # noqa
+    dat = np.random.choice([S, K, I], size=(length,))
+    return ''.join(dat)
+
+
+def run_generate_dataset(output_file, target_language=BLC, count=50000):
+    """
+    Generates a dataset of random lambda calculus reductions.
+
+    Format:
+        01000110100010 0100100010 0010
+        0100100010 0010
+        <space> = next evaluation
+        <newline> = next sequence
+    """
+    with open(output_file, 'w+') as f:
+        for i in tqdm.tqdm(range(count)):
+            try:
+                exp = generate_expression(length=100)
+                tree = parse_blc_raw(exp)
+                st = ' '.join(evaluate_generator(tree,
+                                                 language=target_language))
+                f.write(st)
+                f.write('\n')
+            except Exception:
+                pass
 
 
 if __name__ == '__main__':
@@ -495,6 +557,10 @@ examples:
     parser.add_argument('--language', metavar='lam|blc',
                         help='Language for shell or command.')
 
+    parser.add_argument('--gen_dataset',
+                        help='Generate a dataset. blc --gen_dataset foo.txt',
+                        action='store_true')
+
     parser.add_argument('--target-language', metavar='lam|blc',
                         help='Target language for assembler.')
 
@@ -505,7 +571,10 @@ examples:
                         action='store_true')
 
     args = parser.parse_args()
-    if args.input_file and args.output_file:
+    if args.gen_dataset:
+        output_file = args.input_file
+        run_generate_dataset(output_file, target_language=BLC)
+    elif args.input_file and args.output_file:
         # compilation time
         run_compile(args.input_file, args.output_file,
                     source_language=args.language,
