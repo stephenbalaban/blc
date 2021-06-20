@@ -11,6 +11,11 @@ import os
 import argparse
 import tqdm
 import numpy as np
+import anytree
+import numpy
+from matplotlib import pyplot as plt
+import multiprocessing
+import ctypes
 
 
 # Non-terminals
@@ -42,6 +47,10 @@ NOP = None
 
 # Shell settings
 DEFAULT_PS1 = '> '
+
+
+class CycleException(Exception):
+    pass
 
 
 def IS_VAR(two):
@@ -309,13 +318,16 @@ def is_normal_form(tree, verbose=True):
 
 
 def evaluate(parse_tree, until=is_normal_form, verbose=False,
-             stop_if_looping=True, language=None):
+             stop_if_looping=False, language=None,
+             max_evaluations=200):
     """
     Until is some state like `is_normal_form`
 
     stop_if_looping is just a silly way for us to kill the program if a cycle
     is detected. No this doesn't work for all infinite loops, but it
     certainly does for most of them.
+
+    max_evaluations: maximum number of steps we will do before halting.
     """
     idx = 0
     if stop_if_looping:
@@ -323,8 +335,8 @@ def evaluate(parse_tree, until=is_normal_form, verbose=False,
     while not until(parse_tree):
         redex = beta_reduce(parse_tree, verbose=verbose)
         if stop_if_looping and observed_states.get(str(redex)):
-            raise Exception("We're looping. Cycle length: {}"
-                            .format(len(observed_states)))
+            raise CycleException("We're looping. Cycle length: {}"
+                                 .format(len(observed_states)))
         if verbose:
             tree = tree_to_lang(parse_tree, language=LAM)
             print("eval{}   {}".format(idx, tree))
@@ -332,6 +344,10 @@ def evaluate(parse_tree, until=is_normal_form, verbose=False,
         idx += 1
         if stop_if_looping:
             observed_states[str(redex)] = True
+        if idx == max_evaluations:
+            if verbose:
+                sys.stderr.write("Reached maximum number of cycles.\n")
+            break
     if verbose:
         tree = tree_to_lang(parse_tree, language=LAM)
         print("eval{}   {}".format(idx, tree))
@@ -339,7 +355,9 @@ def evaluate(parse_tree, until=is_normal_form, verbose=False,
 
 
 def evaluate_generator(parse_tree, until=is_normal_form,
-                       stop_if_looping=True, language=None):
+                       stop_if_looping=False, language=None,
+                       verbose=False,
+                       max_evaluations=2000):
     """
     Until is some state like `is_normal_form`
 
@@ -349,19 +367,25 @@ def evaluate_generator(parse_tree, until=is_normal_form,
 
     evaluate generator is like evaluate but results in a generator of every
     step instead of a single tree
+
+    max_evaluations: maximum number of steps we will do before halting.
     """
     idx = 0
     if stop_if_looping:
         observed_states = {}
     while not until(parse_tree):
+        idx += 1
+        if idx == max_evaluations:
+            if verbose:
+                sys.stderr.write("Reached maximum number of cycles.\n")
+            break
         redex = beta_reduce(parse_tree)
         if stop_if_looping and observed_states.get(str(redex)):
-            raise Exception("We're looping. Cycle length: {}"
-                            .format(len(observed_states)))
+            raise CycleException("We're looping. Cycle length: {}"
+                                 .format(len(observed_states)))
         tree = tree_to_lang(parse_tree, language=language)
         yield tree
         parse_tree = redex
-        idx += 1
         if stop_if_looping:
             observed_states[str(redex)] = True
     tree = tree_to_lang(parse_tree, language=language)
@@ -504,14 +528,24 @@ def generate_expression(length=10):
     Only left-skewed trees are generated, i.e.
         ((((foo bar) baz) qux) ...)
     """
+    return generate_SKI(length=length, s_p=0.1, k_p=0.45, i_p=0.45)
+
+
+def generate_SKI(length=10, s_p=0.1, k_p=0.1, i_p=0.8):
+    """
+    Only left-skewed trees are generated, i.e.
+        ((((foo bar) baz) qux) ...)
+    """
     # define the combinators
     S = '00000001011110100111010'
     K = '0000110'
     I = '0010' # noqa
     blc_apply = NT_APPLY
     # generate random combinators
+    t = s_p + k_p + i_p
+    normp = [s_p/t, k_p/t, i_p/t]
     rcombs = np.random.choice([S, K, I], size=(length,),
-                              p=[0.1, 0.45, 0.45])
+                              p=normp)
     # create a 'string' of combinators. See McLennan 1997.
     result = rcombs[0]
     for i in range(length-1):
@@ -519,8 +553,40 @@ def generate_expression(length=10):
     return result
 
 
+def generate_SK_deterministic(s_c, k_c):
+    total_count = s_c + k_c
+    S = '00000001011110100111010'
+    K = '0000110'
+    I = '0010'  # noqa
+    blc_apply = NT_APPLY
+    return blc_apply * (total_count - 1) + S*s_c + K*k_c
+
+
+def show_tree(tree):
+    def walk_tree(tr, parent):
+        if type(tr) == int:
+            n = anytree.Node(str(tr), parent=parent)
+            return n
+        elif type(tr) == tuple:
+            a, b = tr
+            n = anytree.Node(str(a), parent=parent)
+            walk_tree(b, parent=n)
+            return n
+        elif type(tr) == list:
+            a, b = tr
+            n = anytree.Node('[', parent=parent)
+            walk_tree(a, parent=n)
+            walk_tree(b, parent=n)
+            return n
+        else:
+            raise Exception
+    n = walk_tree(tree, parent=None)
+    for pre, fill, node in anytree.RenderTree(n):
+        print("%s%s" % (pre, node.name))
+
+
 def run_generate_dataset(output_file, target_language=BLC, count=5000000,
-                         exp_length=25):
+                         exp_length=25, verbose=False):
     """
     Generates a dataset of random lambda calculus reductions.
 
@@ -532,15 +598,59 @@ def run_generate_dataset(output_file, target_language=BLC, count=5000000,
     """
     with open(output_file, 'w+') as f:
         for i in tqdm.tqdm(range(count)):
-            try:
-                exp = generate_expression(length=exp_length)
-                tree = parse_blc_raw(exp)
-                st = ' '.join(evaluate_generator(tree,
-                                                 language=target_language))
-                f.write(st)
-                f.write('\n')
-            except Exception:
-                pass
+            exp = generate_expression(length=exp_length)
+            tree = parse_blc_raw(exp)
+            if verbose:
+                show_tree(tree)
+            st = ' '.join(evaluate_generator(tree,
+                                             language=target_language))
+            f.write(st)
+            f.write('\n')
+
+
+numpy.set_printoptions(threshold=sys.maxsize)
+width = 5
+expr_length = 9
+height = width
+data_back = multiprocessing.Array(ctypes.c_int, width*height*width)
+data = np.ctypeslib.as_array(data_back.get_obj())
+data = data.reshape(height, width, width)
+lock = multiprocessing.Lock()
+
+
+def num_iters(s_k_i):
+    s_count, k_count, i_count = s_k_i
+    i_factor = i_count / width
+    total_combs = s_count + k_count
+    if not total_combs:
+        return 0
+    prog = generate_SKI(length=expr_length,
+                        s_p=(1-i_factor)*(s_count/total_combs),
+                        k_p=(1-i_factor)*(k_count/total_combs),
+                        i_p=i_factor)
+    tree = parse_blc_raw(prog)
+    num_iters = len(list(evaluate_generator(tree, language=BLC)))
+    lock.acquire()
+    data[i_count][k_count][s_count] = num_iters
+    lock.release()
+
+
+def run_plot(output_file):
+    pool = multiprocessing.Pool()
+    pairs = [(s_count, k_count, i_count)
+             for s_count in reversed(range(width))
+             for k_count in reversed(range(height))
+             for i_count in reversed(range(width))]
+
+    for _ in tqdm.tqdm(pool.imap_unordered(num_iters, pairs),
+                       total=len(pairs)):
+        pass
+    pool.close()
+    pool.join()
+    for i in range(width):
+        plt.imshow(data[i], interpolation='nearest',
+                   cmap=plt.get_cmap('plasma'))
+        plt.savefig('output/{}.png'.format(str(i).zfill(10)))
 
 
 if __name__ == '__main__':
@@ -574,6 +684,10 @@ examples:
                         help='Generate a dataset. blc --gen_dataset foo.txt',
                         action='store_true')
 
+    parser.add_argument('--plot',
+                        help='Generate a plot X axis is S Y is K.',
+                        action='store_true')
+
     parser.add_argument('--target-language', metavar='lam|blc',
                         help='Target language for assembler.')
 
@@ -584,7 +698,9 @@ examples:
                         action='store_true')
 
     args = parser.parse_args()
-    if args.gen_dataset:
+    if args.plot:
+        run_plot(output_file=args.input_file)
+    elif args.gen_dataset:
         output_file = args.input_file
         run_generate_dataset(output_file, target_language=BLC)
     elif args.input_file and args.output_file:

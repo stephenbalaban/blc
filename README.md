@@ -215,3 +215,13 @@ E = Y (λe c s.s (λa t.t (λb.a (e (λx.b(c(λz y.x <y, z>))(e (λy.c(λz.x z (
   = λf.((λx.x x)(λx.f (x x))) (λe c s.s (λa t.t (λb.a (e (λx.b(c(λz y.x <y, z>))(e (λy.c(λz.x z (y z)))))) (b (c (λz.z b))(λs.e (λx.c(λz.x (z b))) t)))))
 
 Translated into de Bruijn indices:
+
+# Some thoughts along the way.
+
+1. There is some really cute analogy that must exist between conway's game of
+   life and the Lambda calculus in terms of:
+    a. expressions that repeat themselves through time \s.(s s) \s.(s s)
+    b. expressions that normalize (terminate) and GOL that reach a stable state
+    c. expressions that expand forever (puffer trains, etc.)
+2. What if we do an X/Y plot where you add S combinators on X axis and
+   K combinators along Y axis.
