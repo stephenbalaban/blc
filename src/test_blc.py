@@ -14,7 +14,7 @@ from blc import LAMBDA
 
 def passert_eq(raw_str, expectation):
     # Use id for name
-    parsed = blc.parse_raw(raw_str)
+    parsed = blc.parse_blc_raw(raw_str)
     msg = ("{} test: '{}' => '{}' expected but got '{}'"
            .format('parse', raw_str, expectation, parsed))
     assert parsed == expectation, msg
@@ -31,7 +31,7 @@ def rassert_eq(raw_str, expectation):
 
 def assert_eq(raw_str, fn, expectation):
     # Normal form tests
-    parsed = blc.parse_raw(raw_str)
+    parsed = blc.parse_blc_raw(raw_str)
     result = fn(parsed)
     msg = ("{} test: ({}) '{}' => '{}' expected but got '{}'"
            .format(fn.__name__, raw_str, parsed, expectation, result))
@@ -50,7 +50,7 @@ def sassert_eq(lhs, rhs, expectation):
           .format(lhs, rhs, result))
 
 
-if __name__ == '__main__':
+def test_blc():
     # parse
     # invalid
     passert_eq('000100011100110100001110011010',
@@ -139,3 +139,35 @@ if __name__ == '__main__':
     # Pow 2^3
     rassert_eq('010000011100111001110100000011100111010',
                (LAMBDA, (LAMBDA, [1, [1, [1, [1, [1, [1, [1, [1, 0]]]]]]]])))
+
+
+def test_identity_applied_identity():
+    assert blc.eval_string('0100100010') == '0010'
+
+
+def test_self_identity():
+    assert blc.eval_string('01000110100010') == '0010'
+
+
+def test_SKK_identity():
+    # equiv to ((\x.\y.\z.((x z) (y z)) \x.y.x) \x.y.x)
+    # equiv to ((\ \ \ ((3 1) (2 1)) \ \ 2 ) \ \ 2) in de bruijn notation
+    blcexpr = '01010000000101111010011101000001100000110'
+    assert blc.eval_string(blcexpr) == '0010'
+
+
+def test_xyz_zxy_identity():
+    # equiv to (\x.\y.\z.((z x) y) \x.x)
+    # equiv to \\\ 0 2 1 in  debruijn notation
+    # should be \x.\y.((y \z.z) x) when done
+    assert blc.eval_string('0100000001011011101100010') == '00000101100010110'
+
+
+def test_k_combinator():
+    # equiv to ((\x.\y.x \x.(x x)) \x.x)
+    # which is just \x.(x x)
+    K = '0000110'
+    self = '00011010'
+    I = '0010' # noqa
+    print(blc.eval_string(blc.NT_APPLY*2+K+self+I))
+    assert blc.eval_string(blc.NT_APPLY*2+K+self+I) == '00011010'

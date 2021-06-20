@@ -202,7 +202,7 @@ def parse_blc_raw(raw_text):
 
 
 def parse_lambda_raw(raw_text):
-    return parse
+    raise Exception("Can't parse \\x.x lambda use blc.")
 
 
 def pprint(parse_tree):
@@ -326,14 +326,14 @@ def evaluate(parse_tree, until=is_normal_form, verbose=False,
             raise Exception("We're looping. Cycle length: {}"
                             .format(len(observed_states)))
         if verbose:
-            tree = tree_to_lang(parse_tree, language=language)
+            tree = tree_to_lang(parse_tree, language=LAM)
             print("eval{}   {}".format(idx, tree))
         parse_tree = redex
         idx += 1
         if stop_if_looping:
             observed_states[str(redex)] = True
     if verbose:
-        tree = tree_to_lang(parse_tree, language=language)
+        tree = tree_to_lang(parse_tree, language=LAM)
         print("eval{}   {}".format(idx, tree))
     return parse_tree
 
@@ -382,10 +382,10 @@ def tree_to_blc(parse_tree):
         if type(tree) == int:
             yield int_to_debruijn(tree)
         elif type(tree) == tuple:
-            yield '00' + tree_to_blc(tree[1])
+            yield NT_LAMBDA + tree_to_blc(tree[1])
         elif type(tree) == list:
             a, b = tree
-            yield '01' + tree_to_blc(a) + tree_to_blc(b)
+            yield NT_APPLY + tree_to_blc(a) + tree_to_blc(b)
         else:
             raise TypeError("Unknown type for parse_tree {}"
                             .format(parse_tree))
@@ -403,7 +403,7 @@ def tree_to_lam(parse_tree, depth=0, lambda_sym=NT_LAMBDA_LAM, debruijn=False):
             if debruijn:
                 yield str(tree)
             else:
-                var = alphabet[tree]
+                var = alphabet[depth-tree-1]
                 yield var
         elif type(tree) == tuple:
             body = tree_to_lam(tree[1], depth=depth+1, debruijn=debruijn)
@@ -500,14 +500,27 @@ def eval_string(contents, language=None, verbose=False):
 
 
 def generate_expression(length=10):
-    S = '0000000101101110011101110'
+    """
+    Only left-skewed trees are generated, i.e.
+        ((((foo bar) baz) qux) ...)
+    """
+    # define the combinators
+    S = '00000001011110100111010'
     K = '0000110'
-    I = '0011' # noqa
-    dat = np.random.choice([S, K, I], size=(length,))
-    return ''.join(dat)
+    I = '0010' # noqa
+    blc_apply = NT_APPLY
+    # generate random combinators
+    rcombs = np.random.choice([S, K, I], size=(length,),
+                              p=[0.1, 0.45, 0.45])
+    # create a 'string' of combinators. See McLennan 1997.
+    result = rcombs[0]
+    for i in range(length-1):
+        result = blc_apply + result + rcombs[i]
+    return result
 
 
-def run_generate_dataset(output_file, target_language=BLC, count=50000):
+def run_generate_dataset(output_file, target_language=BLC, count=5000000,
+                         exp_length=25):
     """
     Generates a dataset of random lambda calculus reductions.
 
@@ -520,7 +533,7 @@ def run_generate_dataset(output_file, target_language=BLC, count=50000):
     with open(output_file, 'w+') as f:
         for i in tqdm.tqdm(range(count)):
             try:
-                exp = generate_expression(length=100)
+                exp = generate_expression(length=exp_length)
                 tree = parse_blc_raw(exp)
                 st = ' '.join(evaluate_generator(tree,
                                                  language=target_language))
@@ -579,12 +592,11 @@ examples:
         run_compile(args.input_file, args.output_file,
                     source_language=args.language,
                     target_language=args.target_language)
+    elif args.input_file == 'shell':
+        run_shell(language=args.language)
     elif args.input_file:
         # run file
         run_file(args.input_file, verbose=args.verbose)
     elif args.c:
-        # command tie
+        # command time
         pprint(eval_string(args.c, language=args.language))
-    else:
-        # shell time
-        run_shell(language=args.language)
